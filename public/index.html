@@ -2,11 +2,16 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Global Maritime Radar - Fast Edition</title>
+    <title>Global Maritime Radar - Auto-Scaling</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
+        :root {
+            /* This is the dynamic variable that will change as we zoom */
+            --ship-size: 14px; 
+        }
         body { margin: 0; background: #0b0b0b; font-family: sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; background: #050505; }
+        
         .panel {
             position: absolute; top: 20px; left: 20px; z-index: 1000;
             background: rgba(0,0,0,0.85); color: #00ffcc; padding: 15px;
@@ -16,6 +21,20 @@
             position: absolute; top: 20px; right: 20px; z-index: 1000;
             background: #111; color: white; padding: 20px; width: 240px;
             display: none; border: 1px solid #00ffcc; border-radius: 8px;
+        }
+
+        /* The container handles the rotation */
+        .ship-container {
+            display: flex; justify-content: center; align-items: center;
+            width: 100%; height: 100%;
+        }
+        
+        /* The SVG handles the dynamic sizing */
+        .ship-container svg {
+            width: var(--ship-size);
+            height: var(--ship-size);
+            fill: #00ffcc;
+            transition: width 0.2s, height 0.2s; /* Smooth growing/shrinking */
         }
     </style>
 </head>
@@ -46,11 +65,40 @@
         
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
 
+        // --- DYNAMIC ZOOM SCALING ---
+        function updateShipSize() {
+            const z = map.getZoom();
+            let newSize = 12; // Base size for zoomed out
+            if (z >= 6) newSize = 16;
+            if (z >= 8) newSize = 22;
+            if (z >= 10) newSize = 28;
+            if (z >= 12) newSize = 36; // Maximum size when zoomed way in
+            document.documentElement.style.setProperty('--ship-size', newSize + 'px');
+        }
+        // Run it once on load, and listen for map zooms
+        updateShipSize();
+        map.on('zoomend', updateShipSize);
+        // ----------------------------
+
         const vessels = {};
         const markers = {};
         const socket = io({ transports: ['websocket', 'polling'] });
 
-        const getIconHtml = (cog) => `<div style="transform: rotate(${cog}deg);"><svg viewBox="0 0 24 24" width="14" height="14" style="fill:#00ffcc;"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg></div>`;
+        // The HTML no longer hardcodes the width/height, the CSS handles it now
+        const getIconHtml = (cog) => `
+            <div class="ship-container" style="transform: rotate(${cog}deg);">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/>
+                </svg>
+            </div>
+        `;
+
+        // The iconSize is now set to 40x40 to create a massive, easy-to-click invisible box around the ship
+        const iconConfig = {
+            className: '',
+            iconSize: [40, 40], 
+            iconAnchor: [20, 20]
+        };
 
         socket.on('ship-batch', (batch) => {
             const bounds = map.getBounds();
@@ -74,25 +122,22 @@
                         markers[mmsi].setLatLng(pos);
                         const el = markers[mmsi].getElement();
                         if (el) {
-                            const div = el.querySelector('div');
+                            const div = el.querySelector('.ship-container');
                             if (div) div.style.transform = `rotate(${cog}deg)`;
                         }
                     } else {
                         markers[mmsi] = L.marker(pos, {
-                            icon: L.divIcon({
-                                className: '',
-                                html: getIconHtml(cog),
-                                iconSize: [14, 14], 
-                                iconAnchor: [7, 7]
-                            })
+                            ...iconConfig,
+                            html: getIconHtml(cog)
                         }).addTo(map).on('click', () => {
                             const v = vessels[mmsi];
                             document.getElementById('details').style.display = 'block';
                             document.getElementById('v-name').innerText = v.name;
                             document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
-                            // Changed to panTo to prevent zooming
                             map.panTo(pos); 
                         });
+                        // Leaflet quirk: we have to set HTML after creation when merging config
+                        markers[mmsi].setIcon(L.divIcon({...iconConfig, html: getIconHtml(cog)}));
                     }
                 }
             });
@@ -114,14 +159,15 @@
                 const pos = [v.lat, v.lon];
                 if (bounds.contains(pos) && !markers[mmsi]) {
                     markers[mmsi] = L.marker(pos, {
-                        icon: L.divIcon({ className: '', html: getIconHtml(v.cog), iconSize: [14, 14], iconAnchor: [7, 7] })
+                        ...iconConfig,
+                        html: getIconHtml(v.cog)
                     }).addTo(map).on('click', () => {
                         document.getElementById('details').style.display = 'block';
                         document.getElementById('v-name').innerText = v.name;
                         document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
-                        // Changed to panTo to prevent zooming
                         map.panTo(pos);
                     });
+                    markers[mmsi].setIcon(L.divIcon({...iconConfig, html: getIconHtml(v.cog)}));
                 }
             });
             document.getElementById('counter').innerText = `${Object.keys(markers).length} Visible`;
