@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Ships</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 100vh; width: 100%; background: #0b0b0b; }
+        body { margin: 0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const map = L.map('map').setView([20, 0], 2);
+        // Using a dark-mode map style
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        const socket = io();
+        const markers = {};
+
+        socket.on('ship-data', (msg) => {
+            const pos = msg.MetaData;
+            if (pos && pos.latitude && pos.longitude) {
+                const id = pos.MMSI;
+                if (markers[id]) {
+                    markers[id].setLatLng([pos.latitude, pos.longitude]);
+                } else {
+                    markers[id] = L.marker([pos.latitude, pos.longitude]).addTo(map)
+                        .bindPopup(`Ship: ${pos.ShipName || 'Unknown'}`);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
