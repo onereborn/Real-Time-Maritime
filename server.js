@@ -1,42 +1,66 @@
-require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const WebSocket = require('ws');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
 
-app.use(express.static('public'));
+const io = new Server(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
 
-// Connect to the Live Maritime Data Stream
-// Get your free API key at https://aisstream.io/
-const AIS_API_URL = "wss://stream.aisstream.io/v0/stream";
-let maritimeWs = new WebSocket(AIS_API_URL);
+const AIS_API_KEY = process.env.AIS_API_KEY;
+const PORT = process.env.PORT || 3000; 
 
-function connectToAIS() {
-    maritimeWs.on('open', () => {
-        console.log("Connected to AISStream API");
-        const subscription = {
-            APIKey: process.env.API_KEY,
-            BoundingBoxes: [[[-90, -180], [90, 180]]] // Track the whole world
+app.use(express.static(path.join(__dirname, 'public')));
+
+let messageBatch = [];
+setInterval(() => {
+    if (messageBatch.length > 0) {
+        io.emit('ship-batch', messageBatch);
+        messageBatch = [];
+    }
+}, 500);
+
+function connectAIS() {
+    const ws = new WebSocket("wss://stream.aisstream.io/v0/stream");
+
+    ws.on('open', () => {
+        // PROOF TEST: This prints the first 4 characters of your key to the Render logs safely
+        if (AIS_API_KEY) {
+            console.log(`✅ Connected! Using API Key starting with: ${AIS_API_KEY.substring(0, 4)}...`);
+        } else {
+            console.log(`❌ ERROR: API Key is UNDEFINED!`);
+        }
+
+        const subscriptionMessage = {
+            APIKey: AIS_API_KEY,
+            BoundingBoxes: [[[-90, -180], [90, 180]]] 
         };
-        maritimeWs.send(JSON.stringify(subscription));
+        ws.send(JSON.stringify(subscriptionMessage));
     });
 
-    maritimeWs.on('message', (data) => {
-        // Send data to the frontend map
-        io.emit('ship-data', JSON.parse(data.toString()));
+    ws.on('message', (data) => {
+        try {
+            const aisData = JSON.parse(data);
+            if (aisData.MetaData && aisData.MetaData.MMSI) {
+                messageBatch.push(aisData);
+            }
+        } catch (e) {}
     });
 
-    maritimeWs.on('close', () => {
-        console.log("Connection lost. Reconnecting...");
-        setTimeout(connectToAIS, 5000);
+    ws.on('error', (err) => console.error("❌ AIS Error:", err.message));
+    
+    ws.on('close', () => {
+        console.log("🔄 AIS Connection lost. Retrying in 5 seconds...");
+        setTimeout(connectAIS, 5000);
     });
 }
 
-connectToAIS();
+connectAIS();
 
-const PORT = 3000;
-server.listen(PORT, () => console.log(`Ship Tracker active at http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server listening on port ${PORT}`);
+});

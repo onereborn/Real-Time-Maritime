@@ -1,139 +1,132 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Global Radar - Clean Arrows</title>
+    <title>Global Maritime Radar - Max Speed</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; background: #050505; font-family: 'Inter', sans-serif; overflow: hidden; }
+        body { margin: 0; background: #050505; font-family: sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; background: #050505; }
-        
-        .ui-panel {
+        .panel {
             position: absolute; top: 20px; left: 20px; z-index: 1000;
-            background: rgba(0,0,0,0.85); color: #00ffcc; padding: 12px 18px;
+            background: rgba(0,0,0,0.85); color: #00ffcc; padding: 15px;
             border-radius: 8px; border: 1px solid #333; pointer-events: none;
         }
         #details {
             position: absolute; top: 20px; right: 20px; z-index: 1000;
-            background: rgba(10,10,10,0.95); color: white; padding: 20px;
-            width: 260px; display: none; border-radius: 8px; border: 1px solid #00ffcc;
+            background: #111; color: white; padding: 20px; width: 240px;
+            display: none; border: 1px solid #00ffcc; border-radius: 8px;
         }
-        .label { color: #666; font-size: 10px; text-transform: uppercase; display: block; margin-top: 10px; }
-        .val { color: #00ffcc; font-size: 14px; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="ui-panel">
-        <div style="font-size: 10px; opacity: 0.7;">LIVE DATA STREAM</div>
-        <div id="counter" style="font-size: 18px; font-weight: bold;">0 Vessels</div>
+    <div class="panel">
+        <div style="font-size: 10px; opacity: 0.6; letter-spacing: 1px;">RADAR STATUS: ACTIVE</div>
+        <div id="counter" style="font-size: 20px; font-weight: bold;">0 Vessels</div>
     </div>
 
     <div id="details">
         <h3 id="v-name" style="margin:0; color:#00ffcc; border-bottom: 1px solid #333; padding-bottom: 10px;">-</h3>
-        <span class="label">MMSI</span><div id="v-mmsi" class="val">-</div>
-        <span class="label">Destination</span><div id="v-dest" class="val">-</div>
-        <span class="label">Course / Speed</span><div id="v-nav" class="val">-</div>
-        <button onclick="document.getElementById('details').style.display='none'" style="width:100%; background:#222; color:white; border:1px solid #444; padding:8px; cursor:pointer; margin-top:20px; border-radius:4px;">CLOSE</button>
+        <p id="v-info" style="font-size: 13px; line-height: 1.6; color: #ccc;"></p>
+        <button onclick="document.getElementById('details').style.display='none'" style="width:100%; padding:8px; cursor:pointer; background:#222; color:white; border:1px solid #444;">CLOSE</button>
     </div>
 
     <div id="map"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="/socket.io/socket.io.js"></script>
-
     <script>
-        // Start map with high-performance settings
-        const map = L.map('map', {
-            preferCanvas: true,
+        const map = L.map('map', { 
+            preferCanvas: true, 
             zoomControl: false,
             minZoom: 3,
-            maxBounds: [[-85, -180], [85, 180]]
+            maxBounds: [[-90, -180], [90, 180]]
         }).setView([20, 0], 3);
-
+        
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
 
-        const shipData = {};
+        const vessels = {};
         const markers = {};
-        const socket = io();
+        const socket = io({ transports: ['websocket', 'polling'] });
 
-        const createIcon = (heading) => L.divIcon({
-            className: '',
-            html: `<div style="transform: rotate(${heading}deg); display: flex; justify-content: center; align-items: center;">
-                    <svg viewBox="0 0 24 24" width="22" height="22" style="fill: #00ffcc; filter: drop-shadow(0 0 2px black);">
-                        <path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z" />
-                    </svg>
-                   </div>`,
-            iconSize: [40, 40],
-            iconAnchor: [20, 20]
-        });
+        // Fast SVG generator (removed shadows/transitions to prevent lag)
+        const getIconHtml = (cog) => `<div style="transform: rotate(${cog}deg);"><svg viewBox="0 0 24 24" width="20" height="20" style="fill:#00ffcc;"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg></div>`;
 
-        socket.on('ship-data', (data) => {
-            const meta = data.MetaData;
-            if (!meta?.MMSI) return;
-            const mmsi = meta.MMSI;
-            const msg = data.Message;
-
-            shipData[mmsi] = {
-                name: meta.ShipName?.trim() || "Unknown Vessel",
-                lat: meta.latitude,
-                lon: meta.longitude,
-                cog: msg?.PositionReport?.Cog ?? shipData[mmsi]?.cog ?? 0,
-                sog: msg?.PositionReport?.Sog ?? shipData[mmsi]?.sog ?? 0,
-                dest: msg?.ShipStaticData?.Destination || shipData[mmsi]?.dest || "N/A"
-            };
-
-            // Frustum Culling: Only render if in view
-            if (map.getBounds().contains([meta.latitude, meta.longitude])) {
-                updateMarker(mmsi);
-            } else if (markers[mmsi]) {
-                map.removeLayer(markers[mmsi]);
-                delete markers[mmsi];
-            }
+        // Listen for the 'ship-batch' instead of individual ships
+        socket.on('ship-batch', (batch) => {
+            const bounds = map.getBounds();
             
-            document.getElementById('counter').innerText = `${Object.keys(markers).length} Ships Visible`;
+            batch.forEach(data => {
+                const meta = data.MetaData;
+                const mmsi = meta.MMSI;
+                const pos = [meta.latitude, meta.longitude];
+                const cog = data.Message?.PositionReport?.Cog || vessels[mmsi]?.cog || 0;
+
+                vessels[mmsi] = {
+                    name: meta.ShipName?.trim() || "Unknown",
+                    cog: cog,
+                    dest: data.Message?.ShipStaticData?.Destination || vessels[mmsi]?.dest || "N/A",
+                    lat: meta.latitude,
+                    lon: meta.longitude
+                };
+
+                if (bounds.contains(pos)) {
+                    if (markers[mmsi]) {
+                        markers[mmsi].setLatLng(pos);
+                        const el = markers[mmsi].getElement();
+                        if (el) {
+                            const div = el.querySelector('div');
+                            if (div) div.style.transform = `rotate(${cog}deg)`;
+                        }
+                    } else {
+                        markers[mmsi] = L.marker(pos, {
+                            icon: L.divIcon({
+                                className: '',
+                                html: getIconHtml(cog),
+                                iconSize: [20, 20], iconAnchor: [10, 10]
+                            })
+                        }).addTo(map).on('click', () => {
+                            const v = vessels[mmsi];
+                            document.getElementById('details').style.display = 'block';
+                            document.getElementById('v-name').innerText = v.name;
+                            document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
+                            map.flyTo(pos, 9);
+                        });
+                    }
+                }
+            });
+            document.getElementById('counter').innerText = `${Object.keys(markers).length} Visible`;
         });
 
-        function updateMarker(mmsi) {
-            const s = shipData[mmsi];
-            const pos = [s.lat, s.lon];
-
-            if (markers[mmsi]) {
-                markers[mmsi].setLatLng(pos);
-                const el = markers[mmsi].getElement();
-                if (el) {
-                    const iconDiv = el.querySelector('div');
-                    if (iconDiv) iconDiv.style.transform = `rotate(${s.cog}deg)`;
-                }
-            } else {
-                markers[mmsi] = L.marker(pos, {
-                    icon: createIcon(s.cog)
-                }).addTo(map).on('click', (e) => {
-                    L.DomEvent.stopPropagation(e);
-                    showDetails(mmsi);
-                });
-            }
-        }
-
-        function showDetails(mmsi) {
-            const s = shipData[mmsi];
-            document.getElementById('details').style.display = 'block';
-            document.getElementById('v-name').innerText = s.name;
-            document.getElementById('v-mmsi').innerText = mmsi;
-            document.getElementById('v-dest').innerText = s.dest;
-            document.getElementById('v-nav').innerText = `${s.cog}° @ ${s.sog} knots`;
-            map.flyTo([s.lat, s.lon], 9);
-        }
-
-        // Auto-clean markers when moving map
+        // When dragging the map, instantly clear hidden ships and load visible ones
         map.on('moveend', () => {
-            const b = map.getBounds();
+            const bounds = map.getBounds();
+            
+            // 1. Remove markers out of bounds
             Object.keys(markers).forEach(id => {
-                if (!b.contains(markers[id].getLatLng())) {
+                if (!bounds.contains(markers[id].getLatLng())) {
                     map.removeLayer(markers[id]);
                     delete markers[id];
                 }
             });
+            
+            // 2. Add markers that are now in bounds from our memory
+            Object.keys(vessels).forEach(mmsi => {
+                const v = vessels[mmsi];
+                const pos = [v.lat, v.lon];
+                if (bounds.contains(pos) && !markers[mmsi]) {
+                    markers[mmsi] = L.marker(pos, {
+                        icon: L.divIcon({ className: '', html: getIconHtml(v.cog), iconSize: [20, 20], iconAnchor: [10, 10] })
+                    }).addTo(map).on('click', () => {
+                        document.getElementById('details').style.display = 'block';
+                        document.getElementById('v-name').innerText = v.name;
+                        document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
+                        map.flyTo(pos, 9);
+                    });
+                }
+            });
+            document.getElementById('counter').innerText = `${Object.keys(markers).length} Visible`;
         });
     </script>
 </body>
