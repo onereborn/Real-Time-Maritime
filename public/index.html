@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Global Maritime Radar - Max Speed</title>
+    <title>Global Maritime Radar - Fast Edition</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; background: #050505; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; background: #0b0b0b; font-family: sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; background: #050505; }
         .panel {
             position: absolute; top: 20px; left: 20px; z-index: 1000;
@@ -42,7 +42,7 @@
             zoomControl: false,
             minZoom: 3,
             maxBounds: [[-90, -180], [90, 180]]
-        }).setView([20, 0], 3);
+        }).setView([40, -40], 4); 
         
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
 
@@ -50,10 +50,8 @@
         const markers = {};
         const socket = io({ transports: ['websocket', 'polling'] });
 
-        // Fast SVG generator (removed shadows/transitions to prevent lag)
-        const getIconHtml = (cog) => `<div style="transform: rotate(${cog}deg);"><svg viewBox="0 0 24 24" width="20" height="20" style="fill:#00ffcc;"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg></div>`;
+        const getIconHtml = (cog) => `<div style="transform: rotate(${cog}deg);"><svg viewBox="0 0 24 24" width="14" height="14" style="fill:#00ffcc;"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg></div>`;
 
-        // Listen for the 'ship-batch' instead of individual ships
         socket.on('ship-batch', (batch) => {
             const bounds = map.getBounds();
             
@@ -84,14 +82,16 @@
                             icon: L.divIcon({
                                 className: '',
                                 html: getIconHtml(cog),
-                                iconSize: [20, 20], iconAnchor: [10, 10]
+                                iconSize: [14, 14], 
+                                iconAnchor: [7, 7]
                             })
                         }).addTo(map).on('click', () => {
                             const v = vessels[mmsi];
                             document.getElementById('details').style.display = 'block';
                             document.getElementById('v-name').innerText = v.name;
                             document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
-                            map.flyTo(pos, 9);
+                            // Changed to panTo to prevent zooming
+                            map.panTo(pos); 
                         });
                     }
                 }
@@ -99,11 +99,9 @@
             document.getElementById('counter').innerText = `${Object.keys(markers).length} Visible`;
         });
 
-        // When dragging the map, instantly clear hidden ships and load visible ones
         map.on('moveend', () => {
             const bounds = map.getBounds();
             
-            // 1. Remove markers out of bounds
             Object.keys(markers).forEach(id => {
                 if (!bounds.contains(markers[id].getLatLng())) {
                     map.removeLayer(markers[id]);
@@ -111,18 +109,18 @@
                 }
             });
             
-            // 2. Add markers that are now in bounds from our memory
             Object.keys(vessels).forEach(mmsi => {
                 const v = vessels[mmsi];
                 const pos = [v.lat, v.lon];
                 if (bounds.contains(pos) && !markers[mmsi]) {
                     markers[mmsi] = L.marker(pos, {
-                        icon: L.divIcon({ className: '', html: getIconHtml(v.cog), iconSize: [20, 20], iconAnchor: [10, 10] })
+                        icon: L.divIcon({ className: '', html: getIconHtml(v.cog), iconSize: [14, 14], iconAnchor: [7, 7] })
                     }).addTo(map).on('click', () => {
                         document.getElementById('details').style.display = 'block';
                         document.getElementById('v-name').innerText = v.name;
                         document.getElementById('v-info').innerHTML = `<b>MMSI:</b> ${mmsi}<br><b>DEST:</b> ${v.dest}<br><b>HDG:</b> ${v.cog}°`;
-                        map.flyTo(pos, 9);
+                        // Changed to panTo to prevent zooming
+                        map.panTo(pos);
                     });
                 }
             });
