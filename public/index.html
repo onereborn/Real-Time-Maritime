@@ -2,16 +2,11 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Global Maritime Radar - Dynamic Zoom</title>
+    <title>Global Maritime Radar - Fast Edition</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        :root {
-            /* This value will multiply as you zoom in */
-            --zoom-scale: 1; 
-        }
         body { margin: 0; background: #0b0b0b; font-family: sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; background: #050505; }
-        
         .panel {
             position: absolute; top: 20px; left: 20px; z-index: 1000;
             background: rgba(0,0,0,0.85); color: #00ffcc; padding: 15px;
@@ -21,25 +16,6 @@
             position: absolute; top: 20px; right: 20px; z-index: 1000;
             background: #111; color: white; padding: 20px; width: 240px;
             display: none; border: 1px solid #00ffcc; border-radius: 8px;
-        }
-
-        /* 1. The Hitbox: Always 50x50 pixels, makes clicking incredibly easy */
-        .ship-hitbox {
-            position: absolute;
-            width: 50px; height: 50px;
-            transform: translate(-50%, -50%);
-            display: flex; justify-content: center; align-items: center;
-        }
-        
-        /* 2. The Scaler: Multiplies the size based on the map zoom */
-        .ship-scaler {
-            transition: transform 0.2s ease;
-            transform: scale(var(--zoom-scale));
-        }
-
-        /* 3. The Rotator: Turns the ship */
-        .ship-rotator {
-            display: flex; justify-content: center; align-items: center;
         }
     </style>
 </head>
@@ -66,46 +42,15 @@
             zoomControl: false,
             minZoom: 3,
             maxBounds: [[-90, -180], [90, 180]]
-        }).setView([50.7, -1.2], 9); // Starts near Cowes based on your screenshot!
+        }).setView([50.7, -1.2], 9); 
         
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { noWrap: true }).addTo(map);
-
-        // --- AGGRESSIVE DYNAMIC ZOOM MATH ---
-        function updateScale() {
-            const z = map.getZoom();
-            let scale = 1;
-            if (z >= 7) scale = 1.2;
-            if (z >= 9) scale = 1.8;
-            if (z >= 11) scale = 2.8;
-            if (z >= 13) scale = 4.5; // Ships will be massive when zoomed in
-            if (z >= 15) scale = 6.0; 
-            document.documentElement.style.setProperty('--zoom-scale', scale);
-        }
-        updateScale();
-        map.on('zoomend', updateScale);
-        // ------------------------------------
 
         const vessels = {};
         const markers = {};
         const socket = io({ transports: ['websocket', 'polling'] });
 
-        const getIconHtml = (cog) => `
-            <div class="ship-hitbox">
-                <div class="ship-scaler">
-                    <div class="ship-rotator" style="transform: rotate(${cog}deg);">
-                        <svg viewBox="0 0 24 24" width="14" height="14" style="fill:#00ffcc;">
-                            <path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/>
-                        </svg>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // CRITICAL FIX: By telling Leaflet the icon is 0x0, it stops squishing our CSS scale
-        const iconConfig = {
-            className: '',
-            iconSize: [0, 0] 
-        };
+        const getIconHtml = (cog) => `<div style="transform: rotate(${cog}deg);"><svg viewBox="0 0 24 24" width="14" height="14" style="fill:#00ffcc;"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg></div>`;
 
         socket.on('ship-batch', (batch) => {
             const bounds = map.getBounds();
@@ -129,13 +74,17 @@
                         markers[mmsi].setLatLng(pos);
                         const el = markers[mmsi].getElement();
                         if (el) {
-                            const div = el.querySelector('.ship-rotator');
+                            const div = el.querySelector('div');
                             if (div) div.style.transform = `rotate(${cog}deg)`;
                         }
                     } else {
                         markers[mmsi] = L.marker(pos, {
-                            ...iconConfig,
-                            html: getIconHtml(cog)
+                            icon: L.divIcon({
+                                className: '',
+                                html: getIconHtml(cog),
+                                iconSize: [14, 14], 
+                                iconAnchor: [7, 7]
+                            })
                         }).addTo(map).on('click', () => {
                             const v = vessels[mmsi];
                             document.getElementById('details').style.display = 'block';
@@ -164,8 +113,7 @@
                 const pos = [v.lat, v.lon];
                 if (bounds.contains(pos) && !markers[mmsi]) {
                     markers[mmsi] = L.marker(pos, {
-                        ...iconConfig,
-                        html: getIconHtml(v.cog)
+                        icon: L.divIcon({ className: '', html: getIconHtml(v.cog), iconSize: [14, 14], iconAnchor: [7, 7] })
                     }).addTo(map).on('click', () => {
                         document.getElementById('details').style.display = 'block';
                         document.getElementById('v-name').innerText = v.name;
