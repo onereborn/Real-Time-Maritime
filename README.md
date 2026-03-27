@@ -24,9 +24,3 @@ To run this project locally, you will need:
 * [Node.js](https://nodejs.org/) installed.
 * A free API key from [AISStream.io](https://aisstream.io/).
 
-## 💻 Local Setup Instructions
-
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/your-username/Real-Time-Maritime.git](https://github.com/your-username/Real-Time-Maritime.git)
-   cd Real-Time-Maritime
